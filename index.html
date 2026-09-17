@@ -24,13 +24,13 @@
 </head>
 <body>
   <main class="app">
-    <div class="top"><div><h1>公式截图，一键变成可编辑公式</h1><p class="subtitle">直接粘贴截图或上传图片。普通公式用快速识别；长公式、矩阵、多行公式用精确识别。无需 Mathpix、无需 App ID / App Key。</p></div><div class="pill">● 本地 OCR · 不上传图片</div></div>
+    <div class="top"><div><h1>公式截图，一键变成可编辑公式</h1><p class="subtitle">直接粘贴截图或上传图片。网页先判断公式复杂度，再只加载需要的模型；复杂公式优先使用 WebGPU 显卡加速。无需 Mathpix、无需 App ID / App Key。</p></div><div class="pill">● 本地 OCR · 不上传图片</div></div>
     <div class="grid">
       <section class="card">
         <h2>1. 粘贴 / 上传公式图片</h2>
         <label id="drop" class="drop" for="fileInput" tabindex="0"><input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" /><div id="dropEmpty" class="drop-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg><b>把公式截图拖到这里</b><span>或者点击选择图片<br/>更快：截图后直接按 <span class="kbd">Ctrl</span> + <span class="kbd">V</span></span></div><img id="previewImg" alt="待识别公式" hidden /></label>
-        <div class="toolbar"><button id="recognizeBtn" class="btn btn-primary" disabled>快速识别</button><button id="accurateBtn" class="btn btn-accurate" disabled>精确识别（复杂公式）</button><button id="clearBtn" class="btn btn-ghost" disabled>清空</button></div>
-        <div id="status" class="status">正在后台加载快速识别模型。首次约需下载 80 MB，之后会由浏览器缓存。</div><div class="progress"><i id="bar"></i></div>
+        <div class="toolbar"><button id="recognizeBtn" class="btn btn-primary" disabled>自动识别</button><button id="accurateBtn" class="btn btn-accurate" disabled>精确识别（复杂公式）</button><button id="clearBtn" class="btn btn-ghost" disabled>清空</button></div>
+        <div id="status" class="status ok">等待公式截图。模型不会预先下载；粘贴图片后再按需加载。</div><div class="progress"><i id="bar"></i></div>
       </section>
       <section class="card right">
         <div class="section"><div class="labelrow"><b>2. 公式预览</b><span class="hint">LaTeX 修改后实时更新</span></div><div id="formulaPreview" class="preview empty">识别结果会显示在这里</div></div>
@@ -38,9 +38,9 @@
         <div class="copy-grid"><button id="copyWordBtn" class="btn btn-primary" disabled>复制到 Word / MathType</button><button id="copyLatexBtn" class="btn btn-ghost" disabled>复制 LaTeX</button><button id="copyMathmlBtn" class="btn btn-ghost" disabled>复制 MathML</button></div>
       </section>
     </div>
-    <div class="privacy"><div class="mini"><b>复杂公式自动重试</b><p>快速模型若出现大量重复符号、明显“跑飞”，会自动切换精确模型再识别。</p></div><div class="mini"><b>截图直接 Ctrl+V</b><p>论文或 PDF 中截图公式，回到本页按 Ctrl+V 即可。</p></div><div class="mini"><b>面向 Word / MathType</b><p>支持复制 MathML + LaTeX，便于转成可编辑公式。</p></div></div>
-    <footer>快速 OCR：<a href="https://github.com/alephpi/Texo" target="_blank" rel="noreferrer">Texo / FormulaNet</a>；精确 OCR：<a href="https://huggingface.co/onnx-community/TexTeller-ONNX" target="_blank" rel="noreferrer">TexTeller-ONNX</a>；浏览器推理：<a href="https://github.com/huggingface/transformers.js" target="_blank" rel="noreferrer">Transformers.js</a>；TeX→MathML：<a href="https://temml.org/" target="_blank" rel="noreferrer">Temml</a>。<br/>本项目源码：<a href="https://github.com/zhangwei981001zw-gif/formula-ocr-word" target="_blank" rel="noreferrer">formula-ocr-word</a>。</footer>
+    <div class="privacy"><div class="mini"><b>按需加载，更快启动</b><p>不再一打开网页就下载快速模型；先判断公式，再只加载真正需要的模型。</p></div><div class="mini"><b>复杂公式 GPU 优先</b><p>支持 WebGPU 时优先使用显卡；不支持时自动退回 CPU/WASM。</p></div><div class="mini"><b>面向 Word / MathType</b><p>支持复制 MathML + LaTeX，便于转成可编辑公式。</p></div></div>
+    <footer>快速 OCR：<a href="https://github.com/alephpi/Texo" target="_blank" rel="noreferrer">Texo / FormulaNet</a>；精确 OCR：<a href="https://huggingface.co/Xenova/texify2" target="_blank" rel="noreferrer">Texify2</a>；浏览器推理：<a href="https://github.com/huggingface/transformers.js" target="_blank" rel="noreferrer">Transformers.js</a>；TeX→MathML：<a href="https://temml.org/" target="_blank" rel="noreferrer">Temml</a>。<br/>本项目源码：<a href="https://github.com/zhangwei981001zw-gif/formula-ocr-word" target="_blank" rel="noreferrer">formula-ocr-word</a>。</footer>
   </main>
-  <div id="toast" class="toast"></div><script type="module" src="./app.js"></script>
+  <div id="toast" class="toast"></div><script type="module" src="./app.js?v=20260917-lazy3"></script>
 </body>
 </html>
