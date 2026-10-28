@@ -1,5 +1,5 @@
-const FAST_HINT = '快速模型约 80 MB，仅在普通公式需要时加载。';
-const ACCURATE_HINT = '高精度 Texify2 约 250–300 MB，仅在复杂公式需要时加载；支持 WebGPU 时优先用显卡。';
+const FAST_HINT = '极速识别优先尝试 WebGPU 显卡，不支持时自动使用 CPU；首次需加载模型（约 80 MB）。';
+const ACCURATE_HINT = 'Texify2 模型约 250–300 MB，仅在手动点击时加载；支持 WebGPU 时优先用显卡。';
 const $ = (id) => document.getElementById(id);
 
 const drop = $('drop');
@@ -25,8 +25,10 @@ let recognizing = false;
 let lastEngine = '';
 let renderTimer = null;
 let analysisCache = null;
+let recognitionStartedAt = 0;
+let lastLoadMs = 0;
 
-const worker = new Worker('./ocr-worker.js?v=20260917-lazy3', { type: 'module' });
+const worker = new Worker('./ocr-worker.js?v=20261028-speed1', { type: 'module' });
 
 function setStatus(text, kind = '') {
   statusEl.textContent = text;
@@ -241,7 +243,7 @@ async function loadImage(file, auto = true) {
   setProgress(0);
   updateButtons();
   renderFormula();
-  setStatus('图片已就绪。正在判断公式复杂度；只会加载真正需要的识别模型。');
+  setStatus('图片已就绪，优先使用极速模型；复杂公式可手动选择精确识别。');
   if (auto) await recognizeSmart();
 }
 
@@ -266,20 +268,18 @@ function clearAll() {
 async function recognizeSmart() {
   if (!currentFile || recognizing) return;
   recognizing = true;
-  lastEngine = '';
+  lastEngine = 'fast';
+  recognitionStartedAt = performance.now();
+  lastLoadMs = 0;
   updateButtons();
   setProgress(0);
-  setStatus('正在分析公式尺寸…');
+  setStatus('正在裁剪图片并准备极速识别…');
   try {
     const prep = await analyzeAndPreprocess(currentFile);
-    if (prep.aspect >= 2.8) {
-      recognizing = false;
-      await recognizeAccurate(true, `检测到横向长公式（宽高比 ${prep.aspect.toFixed(1)}），跳过快速模型，直接使用高精度模型。`);
-    } else {
-      lastEngine = 'fast';
-      setStatus(`普通公式：${FAST_HINT} 正在准备快速识别…`);
-      worker.postMessage({ type: 'predict-fast', pixels: prep.pixels.buffer }, [prep.pixels.buffer]);
-    }
+    // Transfer a copy: transferring the cached buffer would detach it and break retries.
+    const pixelsCopy = prep.pixels.slice();
+    setStatus(FAST_HINT + ' 正在准备识别…');
+    worker.postMessage({ type: 'predict-fast', pixels: pixelsCopy.buffer }, [pixelsCopy.buffer]);
   } catch (err) {
     recognizing = false;
     updateButtons();
@@ -287,13 +287,15 @@ async function recognizeSmart() {
   }
 }
 
-async function recognizeAccurate(auto = false, reason = '') {
+async function recognizeAccurate() {
   if (!currentFile || recognizing) return;
   recognizing = true;
   lastEngine = 'accurate';
+  recognitionStartedAt = performance.now();
+  lastLoadMs = 0;
   updateButtons();
   setProgress(0);
-  setStatus(`${reason || (auto ? '自动切换高精度模型。' : '使用高精度模型。')} ${ACCURATE_HINT}`, 'warn');
+  setStatus('已选择精确识别。' + ACCURATE_HINT, 'warn');
   worker.postMessage({ type: 'predict-accurate', image: currentFile });
 }
 
@@ -317,6 +319,7 @@ worker.addEventListener('message', async (event) => {
       setStatus(`${name}模型已加载，正在识别公式…${data.backend ? `（${data.backend}）` : ''}`);
     }
   } else if (data.type === 'ready') {
+    lastLoadMs = Number.isFinite(data.load_ms) ? data.load_ms : 0;
     setProgress(100);
     setStatus(`${name}模型已就绪${data.backend ? `（${data.backend}）` : ''}，正在识别…`);
   } else if (data.type === 'backend-fallback') {
@@ -324,19 +327,19 @@ worker.addEventListener('message', async (event) => {
   } else if (data.type === 'result') {
     recognizing = false;
     const text = normalizeOcrText(data.text || '');
-    if (engine === 'fast' && looksRunaway(text) && currentFile) {
-      latexEl.value = '';
-      renderFormula();
-      updateButtons();
-      await recognizeAccurate(true, '快速模型输出异常，已自动改用高精度模型。');
-      return;
-    }
-
     latexEl.value = text;
     renderFormula();
     updateButtons();
     const sec = Number.isFinite(data.elapsed_ms) ? (data.elapsed_ms / 1000).toFixed(1) : null;
-    const suffix = `${data.backend ? ` · ${data.backend}` : ''}${sec ? ` · ${sec}s` : ''}`;
+    const totalSec = recognitionStartedAt ? ((performance.now() - recognitionStartedAt) / 1000).toFixed(1) : null;
+    const loadSec = lastLoadMs > 200 ? (lastLoadMs / 1000).toFixed(1) : null;
+    const details = [
+      data.backend || '',
+      sec ? ('推理 ' + sec + 's') : '',
+      loadSec ? ('模型加载 ' + loadSec + 's') : '',
+      totalSec ? ('总计 ' + totalSec + 's') : '',
+    ].filter(Boolean);
+    const suffix = details.length ? ' · ' + details.join(' · ') : '';
     if (!text) {
       setStatus(`${name}识别没有得到有效公式${suffix}。建议把截图裁剪得更紧一些后重试。`, 'warn');
     } else if (looksRunaway(text)) {
@@ -361,7 +364,7 @@ worker.addEventListener('error', (e) => {
 fileInput.addEventListener('change', () => loadImage(fileInput.files?.[0]));
 clearBtn.addEventListener('click', clearAll);
 recognizeBtn.addEventListener('click', recognizeSmart);
-accurateBtn.addEventListener('click', () => recognizeAccurate(false));
+accurateBtn.addEventListener('click', recognizeAccurate);
 latexEl.addEventListener('input', renderFormula);
 
 drop.addEventListener('keydown', (e) => {

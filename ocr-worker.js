@@ -28,6 +28,8 @@ let fastLoadingPromise = null;
 let accuratePipe = null;
 let accurateLoadingPromise = null;
 let accurateBackend = HAS_WEBGPU ? 'WebGPU' : 'WASM';
+let fastBackend = 'WASM';
+let preferFastWasm = false;
 
 function post(type, payload = {}) {
   self.postMessage({ type, ...payload });
@@ -50,27 +52,54 @@ function progressHandler(engine) {
   };
 }
 
+async function loadFast(device) {
+  return VisionEncoderDecoderModel.from_pretrained(FAST_MODEL_ID, {
+    device,
+    dtype: 'fp32',
+    progress_callback: progressHandler('fast'),
+  });
+}
+
 async function initFast() {
   if (fastModel && fastTokenizer) {
-    post('ready', { engine: 'fast', backend: 'WASM' });
+    post('ready', { engine: 'fast', backend: fastBackend, load_ms: 0 });
     return;
   }
   if (fastLoadingPromise) return fastLoadingPromise;
 
   fastLoadingPromise = (async () => {
+    const started = performance.now();
     try {
       post('phase', { engine: 'fast', phase: 'loading' });
-      fastModel = await VisionEncoderDecoderModel.from_pretrained(FAST_MODEL_ID, {
-        dtype: 'fp32',
-        progress_callback: progressHandler('fast'),
+      if (HAS_WEBGPU && !preferFastWasm) {
+        try {
+          fastModel = await loadFast('webgpu');
+          fastBackend = 'WebGPU';
+        } catch (gpuErr) {
+          preferFastWasm = true;
+          post('backend-fallback', {
+            engine: 'fast',
+            message: '快速模型 WebGPU 初始化失败，正在切换 CPU/WASM。',
+          });
+          fastModel = await loadFast('wasm');
+          fastBackend = 'WASM';
+        }
+      } else {
+        fastModel = await loadFast('wasm');
+        fastBackend = 'WASM';
+      }
+      if (!fastTokenizer) {
+        fastTokenizer = await PreTrainedTokenizer.from_pretrained(FAST_MODEL_ID, {
+          progress_callback: progressHandler('fast'),
+        });
+      }
+      post('ready', {
+        engine: 'fast',
+        backend: fastBackend,
+        load_ms: performance.now() - started,
       });
-      fastTokenizer = await PreTrainedTokenizer.from_pretrained(FAST_MODEL_ID, {
-        progress_callback: progressHandler('fast'),
-      });
-      post('ready', { engine: 'fast', backend: 'WASM' });
     } catch (err) {
       fastModel = null;
-      fastTokenizer = null;
       fastLoadingPromise = null;
       sendError(err, 'fast');
       throw err;
@@ -92,12 +121,13 @@ async function loadAccurate(device) {
 
 async function initAccurate() {
   if (accuratePipe) {
-    post('ready', { engine: 'accurate', backend: accurateBackend });
+    post('ready', { engine: 'accurate', backend: accurateBackend, load_ms: 0 });
     return;
   }
   if (accurateLoadingPromise) return accurateLoadingPromise;
 
   accurateLoadingPromise = (async () => {
+    const started = performance.now();
     try {
       post('phase', { engine: 'accurate', phase: 'loading' });
       if (HAS_WEBGPU) {
@@ -116,7 +146,11 @@ async function initAccurate() {
         accuratePipe = await loadAccurate('wasm');
         accurateBackend = 'WASM';
       }
-      post('ready', { engine: 'accurate', backend: accurateBackend });
+      post('ready', {
+        engine: 'accurate',
+        backend: accurateBackend,
+        load_ms: performance.now() - started,
+      });
     } catch (err) {
       accuratePipe = null;
       accurateLoadingPromise = null;
@@ -127,24 +161,46 @@ async function initAccurate() {
   return accurateLoadingPromise;
 }
 
+async function generateFast(pixelValues) {
+  return fastModel.generate({
+    inputs: pixelValues,
+    max_new_tokens: 256,
+    num_beams: 1,
+    do_sample: false,
+  });
+}
+
 async function predictFast(buffer) {
   await initFast();
-  post('phase', { engine: 'fast', phase: 'infer', backend: 'WASM' });
-  const started = performance.now();
+  post('phase', { engine: 'fast', phase: 'infer', backend: fastBackend });
+  let started = performance.now();
   const array = new Float32Array(buffer);
   if (array.length !== 384 * 384) throw new Error('预处理后的图像尺寸无效。');
 
   const one = new Tensor('float32', array, [1, 1, 384, 384]);
   const pixelValues = cat([one, one, one], 1);
-  const outputs = await fastModel.generate({
-    inputs: pixelValues,
-    max_new_tokens: 320,
-    do_sample: false,
-  });
+  let outputs;
+  try {
+    outputs = await generateFast(pixelValues);
+  } catch (gpuErr) {
+    // Some ONNX operators can fail at WebGPU execution time, not only on load.
+    if (fastBackend !== 'WebGPU') throw gpuErr;
+    post('backend-fallback', {
+      engine: 'fast',
+      message: '快速模型 WebGPU 推理失败，正在改用 CPU/WASM 重试。',
+    });
+    fastModel = null;
+    fastLoadingPromise = null;
+    preferFastWasm = true;
+    await initFast();
+    post('phase', { engine: 'fast', phase: 'infer', backend: fastBackend });
+    started = performance.now();
+    outputs = await generateFast(pixelValues);
+  }
   const text = fastTokenizer.batch_decode(outputs, { skip_special_tokens: true })[0] || '';
   post('result', {
     engine: 'fast',
-    backend: 'WASM',
+    backend: fastBackend,
     elapsed_ms: performance.now() - started,
     text,
   });

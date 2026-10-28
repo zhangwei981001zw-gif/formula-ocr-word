@@ -21,7 +21,13 @@ GitHub Pages 地址：
 
 ## 工作方式
 
-公式识别使用 [Texo / FormulaNet](https://github.com/alephpi/Texo) 模型，通过 [Transformers.js](https://github.com/huggingface/transformers.js) 在浏览器中执行 ONNX 推理。首次使用需要下载模型文件（约 80 MB），之后通常会由浏览器缓存。
+默认识别采用 [Texo / FormulaNet](https://github.com/alephpi/Texo)：支持时优先使用 WebGPU，GPU 初始化或推理失败时自动回退 CPU/WASM。首次需要下载快速模型（约 80 MB），后续通常由浏览器缓存。快速模式最长生成 256 个 token，避免异常重复解码浪费时间。
+
+**精确识别（Texify2）只在手动点击时加载**，不会因为公式宽高比过大或快速识别结果异常自动下载 250–300 MB 模型。原有可编辑 LaTeX、MathML 预览及 Word/MathType 复制功能保持不变。
+
+识别完成后的状态栏显示模型后端、推理耗时、必要时的模型加载耗时及总耗时。重复识别同一张图片不会再因为图像缓存 ArrayBuffer 被转移而失效。
+
+如果仍然很慢，请先区分“下载/加载模型”与“推理”阶段；WebGPU 并不保证所有显卡或模型都比 CPU 快。
 
 TeX → MathML 使用 [Temml](https://temml.org/)。
 
